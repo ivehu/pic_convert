@@ -1,0 +1,15 @@
+directories:
+  - /webser/www/pic
+  - /webser/www/images
+
+conversion:
+  webp:
+    quality: 80
+    method: 6
+    threads: true
+  avif:
+    min_quality: 0
+    max_quality: 63
+    speed: 4
+    depth: 10
+    threads: 4
