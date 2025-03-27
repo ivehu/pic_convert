@@ -106,6 +106,7 @@ func fileModTime(path string) time.Time {
 	return info.ModTime()
 }
 
+// 修改watchDirectory函数
 func watchDirectory(ctx context.Context, dir string) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -113,13 +114,18 @@ func watchDirectory(ctx context.Context, dir string) {
 	}
 	defer watcher.Close()
 
-	if err := watcher.Add(dir); err != nil {
-		log.Fatal(err)
-	}
+	// 递归添加监控
+	addWatchRecursively(watcher, dir)
 
 	for {
 		select {
 		case event := <-watcher.Events:
+			if event.Op&fsnotify.Create == fsnotify.Create {
+				// 如果是新建目录则递归监控
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					addWatchRecursively(watcher, event.Name)
+				}
+			}
 			if event.Op&fsnotify.Create == fsnotify.Create ||
 				event.Op&fsnotify.Write == fsnotify.Write {
 				// 延迟处理确保文件完全写入
@@ -133,6 +139,18 @@ func watchDirectory(ctx context.Context, dir string) {
 			return
 		}
 	}
+}
+
+// 新增递归监控函数
+func addWatchRecursively(watcher *fsnotify.Watcher, dir string) {
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			if err := watcher.Add(path); err != nil {
+				log.Printf("监控添加失败: %s - %v", path, err)
+			}
+		}
+		return nil
+	})
 }
 
 func convertImage(srcPath string) {
@@ -157,9 +175,9 @@ func convertImage(srcPath string) {
 	args = append(args, srcPath, "-o", webpPath)
 	cmdWebp := exec.Command("cwebp", args...)
 	if errWebp := cmdWebp.Run(); errWebp != nil {
-		log.Printf("WebP转换失败 [%s] 耗时 %v: %v", filepath.Base(webpPath), time.Since(startWebp).Round(time.Millisecond), errWebp)
+		log.Printf("WebP转换失败 [%s] 耗时 %v: %v", webpPath, time.Since(startWebp).Round(time.Millisecond), errWebp)
 	} else {
-		log.Printf("成功转换WebP [%s] 耗时 %v", filepath.Base(webpPath), time.Since(startWebp).Round(time.Millisecond))
+		log.Printf("成功转换WebP [%s] 耗时 %v", webpPath, time.Since(startWebp).Round(time.Millisecond))
 	}
 
 	// 转换AVIF
@@ -174,8 +192,8 @@ func convertImage(srcPath string) {
 		avifPath,
 	)
 	if errAvif := cmdAvif.Run(); errAvif != nil {
-		log.Printf("AVIF转换失败 [%s] 耗时 %v: %v", filepath.Base(avifPath), time.Since(startAvif).Round(time.Millisecond), errAvif)
+		log.Printf("AVIF转换失败 [%s] 耗时 %v: %v", avifPath, time.Since(startAvif).Round(time.Millisecond), errAvif)
 	} else {
-		log.Printf("成功转换AVIF [%s] 耗时 %v", filepath.Base(avifPath), time.Since(startAvif).Round(time.Millisecond))
+		log.Printf("成功转换AVIF [%s] 耗时 %v", avifPath, time.Since(startAvif).Round(time.Millisecond))
 	}
 }
