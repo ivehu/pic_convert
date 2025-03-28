@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -30,6 +31,7 @@ type Config struct {
 			Threads    int `yaml:"threads"`
 		} `yaml:"avif"`
 	} `yaml:"conversion"`
+	MaxConcurrentConversions int `yaml:"max_concurrent_conversions"`
 }
 
 var cfg *Config
@@ -47,9 +49,27 @@ func loadConfig() *Config {
 	return &cfg
 }
 
+// 新增并发控制通道
+// const maxConcurrentConversions = 10
+// var conversionSem = make(chan struct{}, maxConcurrentConversions)
+var conversionSem chan struct{}
+
 func main() {
 	cfg = loadConfig()
 	ctx := context.Background()
+
+	if cfg == nil {
+		log.Fatal("配置文件没有加载成功")
+	}
+
+	// 验证配置值，若小于等于 0 则使用默认值
+	if cfg.MaxConcurrentConversions <= 0 {
+		log.Printf("配置中的 max_concurrent_conversions 值无效，使用默认值 5")
+		cfg.MaxConcurrentConversions = 5
+	}
+
+	// 创建通道
+	conversionSem = make(chan struct{}, cfg.MaxConcurrentConversions)
 
 	for _, dir := range cfg.Directories {
 		go processExistingFiles(dir)
@@ -60,6 +80,7 @@ func main() {
 }
 
 func processExistingFiles(dir string) {
+	var wg sync.WaitGroup
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -84,11 +105,18 @@ func processExistingFiles(dir string) {
 
 			// 仅当两个目标文件都不存在或需要更新时才转换
 			if !(webpNewer && avifNewer) {
-				convertImage(path)
+				wg.Add(1)
+				go func(p string) {
+					defer wg.Done()
+					conversionSem <- struct{}{}        // 获取信号量
+					defer func() { <-conversionSem }() // 释放信号量
+					convertImage(p)
+				}(path)
 			}
 		}
 		return nil
 	})
+	wg.Wait()
 }
 
 // 检查文件是否存在
@@ -130,7 +158,11 @@ func watchDirectory(ctx context.Context, dir string) {
 				event.Op&fsnotify.Write == fsnotify.Write {
 				// 延迟处理确保文件完全写入
 				time.AfterFunc(1*time.Second, func() {
-					convertImage(event.Name)
+					conversionSem <- struct{}{} // 获取信号量
+					go func(p string) {
+						defer func() { <-conversionSem }() // 释放信号量
+						convertImage(p)
+					}(event.Name)
 				})
 			}
 		case err := <-watcher.Errors:

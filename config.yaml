@@ -1,7 +1,9 @@
+#设置要转换的目录
 directories:
   - /webser/www/pic
   - /webser/www/images
 
+#设置转换格式，webp和avif可以同时设置
 conversion:
   webp:
     quality: 80
@@ -10,6 +12,9 @@ conversion:
   avif:
     min_quality: 0
     max_quality: 63
-    speed: 4
+    speed: 6
     depth: 10
     threads: 4
+
+#设置最大并发转换数，8核建议5，16核建议10
+max_concurrent_conversions: 5
